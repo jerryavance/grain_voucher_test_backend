@@ -1,0 +1,18 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# SQLite database
+db.sqlite3
+
+# Django stuff
+/static/
+/media/
+
+# Environment
+.env
+*.env
+venv/
+db.sqlite3

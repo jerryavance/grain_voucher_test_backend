@@ -1,0 +1,44 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Determine environment
+      id: env
+      run: |
+        if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          echo "environment=production" >> $GITHUB_OUTPUT
+          echo "path=/var/www/grain_voucher/production/backend" >> $GITHUB_OUTPUT
+          echo "service=grain-prod-backend" >> $GITHUB_OUTPUT
+        else
+          echo "environment=staging" >> $GITHUB_OUTPUT
+          echo "path=/var/www/grain_voucher/staging/backend" >> $GITHUB_OUTPUT
+          echo "service=grain-staging-backend" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Deploy to server
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.SERVER_IP }}
+        username: ${{ secrets.SERVER_USER }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        script: |
+          cd ${{ steps.env.outputs.path }}
+          git pull origin ${{ github.ref_name }}
+          source venv/bin/activate
+          pip install -r requirements.txt
+          python manage.py migrate
+          python manage.py collectstatic --noinput
+          sudo systemctl restart ${{ steps.env.outputs.service }}
+          echo "Deployed ${{ steps.env.outputs.environment }} successfully"
