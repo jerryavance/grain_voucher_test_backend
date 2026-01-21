@@ -29,7 +29,7 @@ DEBUG = True #remove in prod to false
 USE_X_FORWARDED_HOST = True
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
-ALLOWED_HOSTS = ['grainvoucher.com', 'www.grainvoucher.com', '157.245.165.113', 'api.grainvoucher.com', '127.0.0.1', 'localhost']
+ALLOWED_HOSTS = ['grainvoucher.com', 'www.grainvoucher.com', '157.245.165.113', 'api.grainvoucher.com', '127.0.0.1', 'localhost', 'grainvouchertestbackend-production.up.railway.app']
 
 CORS_ALLOWED_ORIGINS = [
     "https://grainvoucher.com",
