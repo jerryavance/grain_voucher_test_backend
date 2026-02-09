@@ -15,6 +15,7 @@ ALLOWED_HOSTS = [
 
 CSRF_TRUSTED_ORIGINS = [
     "https://grainvoucher.com",
+    "https://grainvoucher.vercel.app",
     "https://grainvouchertestbackend-production.up.railway.app",
     "http://157.245.165.113",
     "https://157.245.165.113",
@@ -22,6 +23,7 @@ CSRF_TRUSTED_ORIGINS = [
 
 CORS_ALLOWED_ORIGINS = [
     "https://grainvoucher.com",
+    "https://grainvoucher.vercel.app",
 ]
 
 # HTTPS security

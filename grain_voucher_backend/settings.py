@@ -39,6 +39,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://api.grainvoucher.com",
     "https://api.grainvoucher.com",
     "http://localhost:3000",
+    "https://grainvoucher.vercel.app",
 ]
 
 # You might also want to add these for more permissive CORS during development:
