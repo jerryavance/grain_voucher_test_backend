@@ -37,6 +37,7 @@ urlpatterns = [
     path('api/auth/', include('authentication.urls')),
     path('api/hubs/', include('hubs.urls')),
     path('api/vouchers/', include('vouchers.urls', namespace='vouchers')),
+    path('api/sourcing/', include('sourcing.urls', namespace='sourcing')),  
     
     path('api/crm/', include('crm.urls', namespace='crm')),
     path('api/trade/', include('trade.urls', namespace='trade')),

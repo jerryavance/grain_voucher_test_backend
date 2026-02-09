@@ -92,6 +92,7 @@ LOCAL_APPS = [
     "utils",
     "hubs",
     "vouchers",
+    "sourcing",
 
     "reports",
 

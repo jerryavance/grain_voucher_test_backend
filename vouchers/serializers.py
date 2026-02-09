@@ -1,6 +1,5 @@
 # vouchers/serializers.py
 from decimal import Decimal
-from time import timezone
 from django.utils import timezone
 from rest_framework import serializers
 from authentication.models import GrainUser
@@ -11,15 +10,22 @@ from vouchers.models import (
 )
 from authentication.serializers import UserSerializer
 from hubs.serializers import HubSerializer
+
+
 class QualityGradeSerializer(serializers.ModelSerializer):
+    """Vouchers app QualityGrade serializer - ref_name explicitly set to avoid conflicts"""
     class Meta:
         model = QualityGrade
         fields = '__all__'
+        ref_name = 'VoucherQualityGrade'  # Explicit ref_name to avoid conflict with sourcing app
+
 
 class GrainTypeSerializer(serializers.ModelSerializer):
     class Meta:
         model = GrainType
         fields = ['id', 'name', 'description']
+        ref_name = 'VoucherGrainType'  # Fix ref_name conflict with sourcing app
+
 
 class PriceFeedSerializer(serializers.ModelSerializer):
     hub = HubSerializer(read_only=True)
@@ -66,6 +72,7 @@ class PriceFeedSerializer(serializers.ModelSerializer):
             })
 
         return data
+
 
 class DepositSerializer(serializers.ModelSerializer):
     farmer = UserSerializer(read_only=True)
@@ -191,7 +198,6 @@ class DepositSerializer(serializers.ModelSerializer):
     def get_value(self, obj):
         return obj.calculate_value()
 
-# Updated serializers in vouchers/serializers.py
 
 class VoucherSerializer(serializers.ModelSerializer):
     deposit = DepositSerializer(read_only=True)
@@ -203,23 +209,41 @@ class VoucherSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Voucher
-        fields = '__all__'
+        fields = [
+            'id', 'deposit', 'holder', 'issue_date', 'entry_price', 'current_value',
+            'status', 'verification_status', 'verification_status_display',
+            'verified_by', 'verified_at', 'grn_number',
+            'signature_farmer', 'signature_agent', 'updated_at',
+            'can_be_traded', 'can_be_redeemed'
+        ]
         read_only_fields = [
-            'id', 'issue_date', 'current_value', 'status', 
-            'verification_status', 'verified_by', 'verified_at'
+            'id', 'issue_date', 'entry_price', 'current_value',
+            'verification_status', 'verified_by', 'verified_at', 'updated_at'
         ]
 
     def get_can_be_traded(self, obj):
         return obj.can_be_traded()
-    
+
     def get_can_be_redeemed(self, obj):
         return obj.can_be_redeemed()
 
+
+class VoucherVerificationSerializer(serializers.Serializer):
+    """Serializer for verifying or rejecting agent-created vouchers"""
+    action = serializers.ChoiceField(choices=['verify', 'reject'], required=True)
+    notes = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_action(self, value):
+        voucher = self.context.get('voucher')
+        if voucher and voucher.verification_status != 'pending':
+            raise serializers.ValidationError(
+                f"Cannot {value} voucher with status '{voucher.get_verification_status_display()}'"
+            )
+        return value
+
+
 class RedemptionSerializer(serializers.ModelSerializer):
-    voucher = serializers.PrimaryKeyRelatedField(
-        queryset=Voucher.objects.none(),  # Will be set dynamically
-        write_only=True
-    )
+    voucher = serializers.PrimaryKeyRelatedField(queryset=Voucher.objects.all())
     voucher_details = VoucherSerializer(source='voucher', read_only=True)
     requester = UserSerializer(read_only=True)
 
@@ -229,70 +253,73 @@ class RedemptionSerializer(serializers.ModelSerializer):
             'id', 'voucher', 'voucher_details', 'requester', 'request_date',
             'amount', 'fee', 'net_payout', 'status', 'payment_method', 'notes'
         ]
-        read_only_fields = ['id', 'request_date', 'fee', 'net_payout', 'status']
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        if hasattr(self.context.get('request', None), 'user'):
-            user = self.context['request'].user
-            if user.is_authenticated and not getattr(self, 'swagger_fake_view', False):
-                # Only allow redemption of verified vouchers held by the user
-                self.fields['voucher'].queryset = Voucher.objects.filter(
-                    holder=user,
-                    verification_status='verified',
-                    status__in=['issued', 'transferred']
-                )
+        read_only_fields = ['id', 'request_date', 'fee', 'net_payout']
 
     def validate_voucher(self, value):
-        """Additional validation to ensure voucher can be redeemed"""
+        """Validate that voucher can be redeemed"""
         if not value.can_be_redeemed():
             raise serializers.ValidationError(
-                "This voucher cannot be redeemed. It may be pending verification or already redeemed."
+                f"Voucher cannot be redeemed. Status: {value.get_verification_status_display()}, {value.get_status_display()}"
             )
         return value
 
+    def validate_amount(self, value):
+        """Validate redemption amount"""
+        if value <= 0:
+            raise serializers.ValidationError("Redemption amount must be greater than zero")
+        return value
+
+    def validate(self, data):
+        """Validate that amount doesn't exceed voucher value"""
+        voucher = data.get('voucher')
+        amount = data.get('amount')
+        
+        if voucher and amount:
+            if amount > voucher.current_value:
+                raise serializers.ValidationError({
+                    "amount": f"Redemption amount ({amount}) exceeds voucher value ({voucher.current_value})"
+                })
+        
+        return data
+
     def create(self, validated_data):
         validated_data['requester'] = self.context['request'].user
-        return super().create(validated_data)
+        redemption = super().create(validated_data)
+        redemption.calculate_fees_and_net()
+        return redemption
+
 
 class PurchaseOfferSerializer(serializers.ModelSerializer):
     investor = UserSerializer(read_only=True)
-    voucher = serializers.PrimaryKeyRelatedField(
-        queryset=Voucher.objects.none(),  # Will be set dynamically
-        write_only=True
-    )
+    voucher = serializers.PrimaryKeyRelatedField(queryset=Voucher.objects.all())
     voucher_details = VoucherSerializer(source='voucher', read_only=True)
 
     class Meta:
         model = PurchaseOffer
         fields = [
-            'id', 'investor', 'voucher', 'voucher_details', 
+            'id', 'investor', 'voucher', 'voucher_details',
             'offer_price', 'offer_date', 'status', 'notes'
         ]
-        read_only_fields = ['id', 'offer_date', 'status']
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        if hasattr(self.context.get('request', None), 'user'):
-            user = self.context['request'].user
-            if user.is_authenticated and not getattr(self, 'swagger_fake_view', False):
-                # Only allow offers on verified vouchers not held by investors
-                self.fields['voucher'].queryset = Voucher.objects.filter(
-                    status='issued',
-                    verification_status='verified'
-                ).exclude(holder__role='investor')
+        read_only_fields = ['id', 'investor', 'offer_date']
 
     def validate_voucher(self, value):
-        """Additional validation to ensure voucher can be traded"""
+        """Validate that voucher can be traded"""
         if not value.can_be_traded():
             raise serializers.ValidationError(
-                "This voucher cannot be traded. It may be pending verification or not available for trading."
+                f"Voucher cannot be traded. Status: {value.get_verification_status_display()}, {value.get_status_display()}"
             )
+        return value
+
+    def validate_offer_price(self, value):
+        """Validate offer price is positive"""
+        if value <= 0:
+            raise serializers.ValidationError("Offer price must be greater than zero")
         return value
 
     def create(self, validated_data):
         validated_data['investor'] = self.context['request'].user
         return super().create(validated_data)
+
 
 class LedgerEntrySerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
